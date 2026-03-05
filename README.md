@@ -4,7 +4,7 @@
 
 Stop watching the terminal. Let Claude tell you when it's done.
 
-![Notification example](Screenshot%202026-02-19%20103508.png)
+![Notification example](screenshot.png)
 
 ## Why?
 
@@ -69,8 +69,8 @@ Notifications go to an external server, so sensitive data is protected by two la
 
 For detailed setup instructions, notification format examples, troubleshooting, security details, and changelog:
 
-- [**Claude ntfy.sh - GUIDE.md**](Claude%20ntfy.sh%20-%20GUIDE.md) — full guide (Markdown)
-- [**Claude ntfy.sh - GUIDE.pdf**](Claude%20ntfy.sh%20-%20GUIDE.pdf) — full guide (PDF)
+- [**Claude ntfy.sh - GUIDE.md**](Claude%20ntfy.sh%20-%20GUIDE.md) — full guide (Markdown, in Swedish)
+- [**Claude ntfy.sh - GUIDE.pdf**](Claude%20ntfy.sh%20-%20GUIDE.pdf) — full guide (PDF, in Swedish)
 
 ## Requirements
 
