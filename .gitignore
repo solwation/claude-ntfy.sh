@@ -1,1 +1,4 @@
 my setup secrets.txt
+*.env
+ntfy-config.env
+ntfy-errors.log
