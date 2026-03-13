@@ -65,13 +65,6 @@ Notifications go to an external server, so sensitive data is protected by two la
 1. **Prompt-level** — Claude is instructed to never include secrets in notification summaries
 2. **Code-level** — A regex scrubber catches known token formats (GitHub, Stripe, AWS, Slack, JWTs, SSH keys, etc.) and `key=value` patterns with secret-like names, replacing matches with `[REDACTED]`
 
-## Full documentation
-
-For detailed setup instructions, notification format examples, troubleshooting, security details, and changelog:
-
-- [**Claude ntfy.sh - GUIDE.md**](Claude%20ntfy.sh%20-%20GUIDE.md) — full guide (Markdown, in Swedish)
-- [**Claude ntfy.sh - GUIDE.pdf**](Claude%20ntfy.sh%20-%20GUIDE.pdf) — full guide (PDF, in Swedish)
-
 ## Requirements
 
 - `bash` + `python3`
