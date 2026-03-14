@@ -82,10 +82,8 @@ echo '{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"c
 
 After making changes:
 1. **Always run both test suites** — `bash test-setup-claude-ntfy.sh` and `bash test-topic-validation.sh`. All tests must pass.
-2. **Update Claude ntfy.sh - GUIDE.md** if the change affects user-facing behaviour (notification format, flags, installation, etc.).
-3. **Update this CLAUDE.md** if the change affects architecture, design decisions, or developer workflow.
-4. **Bump version** if the change is functional (see Versioning below).
-5. **Generate the PDF** after updating Claude ntfy.sh - GUIDE.md (see PDF Generation below).
+2. **Update this CLAUDE.md** if the change affects architecture, design decisions, or developer workflow.
+3. **Bump version** if the change is functional (see Versioning below).
 
 ## Versioning
 
@@ -97,36 +95,8 @@ The script uses semver (`MAJOR.MINOR.PATCH`):
 When making functional changes:
 1. Bump `VERSION` near the top of `setup-claude-ntfy.sh`.
 2. Add a one-liner to the `HISTORY` heredoc in `setup-claude-ntfy.sh`.
-3. Add a corresponding entry to the Changelog section at the end of `Claude ntfy.sh - GUIDE.md`.
 
 If changes are made shortly after the previous release (same session or same day), fold them into the current version candidate rather than creating a new version number.
-
-## PDF Generation
-
-Generate the PDF from Claude ntfy.sh - GUIDE.md using Python `markdown` + `weasyprint`:
-
-```bash
-python3 -c "
-import markdown, weasyprint
-html = markdown.markdown(open('Claude ntfy.sh - GUIDE.md').read(), extensions=['tables', 'fenced_code'])
-css = weasyprint.CSS(string='''
-  body { font-family: system-ui, sans-serif; font-size: 14px; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 2em; }
-  code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
-  pre { background: #f4f4f4; padding: 1em; border-radius: 6px; overflow-x: auto; }
-  pre code { background: none; padding: 0; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-  th { background: #f4f4f4; }
-  blockquote { border-left: 4px solid #ddd; margin: 1em 0; padding: 0.5em 1em; background: #fafafa; }
-  h1 { border-bottom: 2px solid #333; padding-bottom: 0.3em; }
-  h2 { border-bottom: 1px solid #ddd; padding-bottom: 0.2em; }
-''')
-weasyprint.HTML(string=f'<html><body>{html}</body></html>').write_pdf('Claude ntfy.sh - GUIDE.pdf', stylesheets=[css])
-print('Generated Claude ntfy.sh - GUIDE.pdf')
-"
-```
-
-If `weasyprint` is not installed: `pip install markdown weasyprint`.
 
 ## Dependencies
 
