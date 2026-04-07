@@ -44,6 +44,9 @@ That's it. The script installs everything into `~/.claude/` and is fully idempot
 | `--server` | Self-hosted ntfy server URL | https://ntfy.sh |
 | `--idle` | Enable idle/waiting-for-input notifications | off |
 | `--no-permission` | Disable permission-request notifications | — |
+| `--no-remind` | Disable the per-turn NTFY marker reminder | — |
+| `--version` | Show version number | — |
+| `--history` | Show full release history | — |
 
 ## How it works
 
