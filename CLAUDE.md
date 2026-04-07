@@ -9,7 +9,7 @@ Single bash script (`setup-claude-ntfy.sh`) that installs Claude Code hooks for 
 ## Usage
 
 ```bash
-bash setup-claude-ntfy.sh --topic "my-topic" --token "tk_xxx" [--threshold 30] [--server "https://ntfy.sh"] [--idle] [--no-permission]
+bash setup-claude-ntfy.sh --topic "my-topic" --token "tk_xxx" [--threshold 30] [--server "https://ntfy.sh"] [--idle] [--no-permission] [--no-remind]
 bash setup-claude-ntfy.sh --version
 bash setup-claude-ntfy.sh --history
 ```
@@ -27,7 +27,7 @@ The script performs four operations in sequence:
      - **Notification** (idle_prompt): Sends the `message` field from the hook input as-is.
      - **PermissionRequest**: Sends `tool_name` and description from `tool_input`.
 
-3. **Settings integration** — Merges hooks into `~/.claude/settings.json` under `hooks.Stop`, `hooks.Notification` (with `idle_prompt` matcher), and `hooks.PermissionRequest` (idempotent — updates existing entries or appends new ones, removes disabled events). Hook runs async with 30s timeout.
+3. **Settings integration** — Merges hooks into `~/.claude/settings.json` under `hooks.Stop`, `hooks.Notification` (with `idle_prompt` matcher), `hooks.PermissionRequest`, and `hooks.UserPromptSubmit` (NTFY marker reminder). Idempotent — updates existing entries or appends new ones, removes disabled events. Hook runs async with 30s timeout.
 
 4. **CLAUDE.md update** — Appends instructions to `~/.claude/CLAUDE.md` telling Claude to include `<!-- NTFY: ... -->` summary markers in responses.
 
@@ -39,6 +39,8 @@ The script performs four operations in sequence:
 - Notification falls back to raw user message (truncated to 200 chars) when no NTFY marker is found.
 - Notification titles include the project folder name (from `cwd` in hook input) to identify which Claude session sent the notification.
 - Notification (idle_prompt) hook is disabled by default — it fires redundantly after Stop events. Enable with `--idle`.
+- UserPromptSubmit reminder hook is enabled by default — injects a one-line NTFY marker reminder each turn to prevent Claude from forgetting in long sessions. Disable with `--no-remind`.
+- When no NTFY marker is found, the fallback notification extracts the last assistant text as an outcome summary instead of only showing the raw user prompt.
 - The script is idempotent and safe to run multiple times.
 - Topic validation rejects short (<10 chars), common/obvious, and low-entropy names with a blocklist + entropy check. Weak-but-long topics get an interactive warning prompt.
 - Notification text is auto-capitalized: the first letter of both NTFY marker parts (task and outcome) and fallback user messages are uppercased before sending.

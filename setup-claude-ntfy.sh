@@ -4,9 +4,14 @@ set -euo pipefail
 # setup-claude-ntfy.sh — Install Claude Code ntfy.sh notification hook
 # Usage: bash ~/setup-claude-ntfy.sh --topic "my-topic" --token "tk_xxx" [--threshold 30] [--server "https://ntfy.sh"]
 
-VERSION="1.0.1"
+VERSION="1.1.0"
 
 HISTORY="$(cat << 'HISTEOF'
+1.1.0  2026-04-07  Smarter fallback + prompt reminder for NTFY markers
+  - Fallback notification now extracts last assistant text as outcome summary
+  - New UserPromptSubmit hook reminds Claude to include NTFY markers each turn
+  - New --no-remind flag to disable the prompt reminder
+  - Shorter CLAUDE.md instruction block (survives context compression better)
 1.0.1  2026-02-20  Auto-capitalize notification text
   - First letter of task/outcome in NTFY markers is uppercased
   - Fallback (raw user message) text is also capitalized
@@ -41,6 +46,7 @@ Options:
   --server URL        ntfy-compatible server URL (default: https://ntfy.sh)
   --idle              Enable Notification hook (idle/waiting-for-input alerts, off by default)
   --no-permission     Disable PermissionRequest hook (tool permission alerts)
+  --no-remind         Disable UserPromptSubmit reminder (NTFY marker reminder each turn)
   --help              Show this help message
   --version           Show version number
   --history           Show full release history
@@ -73,6 +79,7 @@ THRESHOLD=30
 SERVER="https://ntfy.sh"
 NOTIFY_IDLE=false
 NOTIFY_PERMISSION=true
+NOTIFY_REMIND=true
 
 require_value() { if [[ $# -lt 2 ]]; then echo "Error: $1 requires a value" >&2; exit 1; fi; }
 
@@ -88,6 +95,7 @@ while [[ $# -gt 0 ]]; do
     --idle)          NOTIFY_IDLE=true;     shift ;;
     --no-idle)       NOTIFY_IDLE=false;    shift ;;
     --no-permission) NOTIFY_PERMISSION=false; shift ;;
+    --no-remind)     NOTIFY_REMIND=false;     shift ;;
     *)
       echo "Unknown option: $1" >&2
       echo "Run '$0 --help' for usage." >&2
@@ -299,9 +307,10 @@ try:
     if duration_secs < threshold:
         sys.exit(0)
 
-    # Count tool usage and look for NTFY summary from last user message onward
+    # Count tool usage, find NTFY summary, and track last assistant text
     tool_counts = {}
     ntfy_summary = None
+    last_assistant_text = ""
     for entry in entries[last_user_idx + 1:]:
         if entry.get("type") == "assistant":
             message = entry.get("message", {})
@@ -313,10 +322,16 @@ try:
                             tool_name = block.get("name", "unknown")
                             tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
                         elif block.get("type") == "text":
+                            text = block.get("text", "").strip()
                             # Look for <!-- NTFY: ... --> marker
-                            m = re.search(r'<!--\s*NTFY:\s*(.+?)\s*-->', block.get("text", ""))
+                            m = re.search(r'<!--\s*NTFY:\s*(.+?)\s*-->', text)
                             if m:
                                 ntfy_summary = m.group(1)
+                            # Track last substantial text for fallback
+                            # Strip the NTFY marker itself from consideration
+                            clean = re.sub(r'<!--\s*NTFY:.*?-->', '', text).strip()
+                            if clean and len(clean) > 20:
+                                last_assistant_text = clean
 
     # Format duration
     mins = int(duration_secs) // 60
@@ -386,14 +401,30 @@ try:
             title = f"Claude done: {project_name} ({duration_str})"
             body = f"📋 {task_part}\n✅ {outcome_part}\n🔧 {tool_summary} · 💻 {hostname}"
         else:
-            # Fallback: raw user message
+            # Fallback: user message as task + last assistant text as outcome
             task_text = last_user_msg[:200].replace("\n", " ").strip()
             if task_text:
                 task_text = task_text[0].upper() + task_text[1:]
             if len(last_user_msg) > 200:
                 task_text += "..."
             title = f"Claude done: {project_name} ({duration_str})"
-            body = f"📋 {task_text}\n🔧 {tool_summary} · 💻 {hostname}"
+
+            if last_assistant_text:
+                # Extract a meaningful tail from the last assistant text
+                outcome = last_assistant_text[-300:].replace("\n", " ").strip()
+                # Try to start at a sentence boundary
+                for sep in ['. ', '! ', '— ', '; ']:
+                    idx = outcome.rfind(sep)
+                    if 0 < idx < len(outcome) - 20:
+                        outcome = outcome[idx + len(sep):]
+                        break
+                if len(outcome) > 200:
+                    outcome = outcome[:200] + "..."
+                if outcome:
+                    outcome = outcome[0].upper() + outcome[1:]
+                body = f"📋 {task_text}\n✅ {outcome}\n🔧 {tool_summary} · 💻 {hostname}"
+            else:
+                body = f"📋 {task_text}\n🔧 {tool_summary} · 💻 {hostname}"
         tags = "robot,white_check_mark"
 
     # Scrub sensitive data before sending
@@ -422,7 +453,7 @@ chmod +x "$HOOK_SCRIPT"
 echo "✓ Wrote $HOOK_SCRIPT"
 
 # ── 3. Merge hooks into settings.json ───────────────────────────────
-python3 - "$SETTINGS_FILE" "$HOOK_SCRIPT" "$NOTIFY_IDLE" "$NOTIFY_PERMISSION" << 'PYEOF'
+python3 - "$SETTINGS_FILE" "$HOOK_SCRIPT" "$NOTIFY_IDLE" "$NOTIFY_PERMISSION" "$NOTIFY_REMIND" << 'PYEOF'
 import json
 import os
 import sys
@@ -431,6 +462,7 @@ settings_file = sys.argv[1]
 hook_command = sys.argv[2]
 notify_idle = sys.argv[3] == "true"
 notify_permission = sys.argv[4] == "true"
+notify_remind = sys.argv[5] == "true"
 
 # Load existing settings
 settings = {}
@@ -501,6 +533,14 @@ upsert_hook("Notification", {
 # PermissionRequest — no matcher (fires for all tools)
 upsert_hook("PermissionRequest", {"hooks": [base_hook]}, notify_permission)
 
+# UserPromptSubmit — reminder to include NTFY marker (prevents forgetting in long sessions)
+remind_hook = {
+    "type": "command",
+    "command": "echo 'End response with: <!-- NTFY: task | outcome -->'",
+    "timeout": 5
+}
+upsert_hook("UserPromptSubmit", {"hooks": [remind_hook]}, notify_remind)
+
 with open(settings_file, "w") as f:
     json.dump(settings, f, indent=2)
     f.write("\n")
@@ -513,16 +553,14 @@ CLAUDE_MD="$CLAUDE_DIR/CLAUDE.md"
 NTFY_BEGIN='# BEGIN NTFY HOOK'
 NTFY_END='# END NTFY HOOK'
 NTFY_BLOCK="$NTFY_BEGIN
-At the very end of every response, include a one-line notification summary in exactly this format:
+REQUIRED — Every response MUST end with this exact format (parsed by notification hook, never shown to user):
 
-<!-- NTFY: [what was asked] | [what was done and key details] -->
+<!-- NTFY: task summary | outcome with file names, function names, counts, specifics -->
 
-Example: <!-- NTFY: Fix failing auth tests | Fixed 3 tests in auth/validate.ts — added null check in validateToken(), updated test fixtures to cover edge case -->
-Example: <!-- NTFY: Add dark mode toggle | Added toggle component to settings page with localStorage persistence, updated theme context provider, all 12 tests pass -->
+Example: <!-- NTFY: fix failing auth tests | Fixed 3 tests in auth/validate.ts — added null check in validateToken(), updated test fixtures to cover edge case -->
+Example: <!-- NTFY: add dark mode toggle | Added toggle component to settings page with localStorage persistence, updated theme context provider, all 12 tests pass -->
 
-Both sides of the | must start with a capital letter (sentence-style). Be descriptive — include file names, function names, counts, and specifics. Keep each side under 400 characters. This line is parsed by a notification hook and never shown to the user.
-
-SECURITY: Never include passwords, API keys, tokens, secrets, credentials, connection strings, or other sensitive values in the NTFY summary. Describe what was done without reproducing secret values. For example, write 'Updated API key in .env' NOT 'Set API_KEY=sk-live-abc123 in .env'.
+SECURITY: Never include passwords, API keys, tokens, secrets, or credentials in the NTFY line.
 $NTFY_END"
 
 if [[ -f "$CLAUDE_MD" ]]; then
@@ -561,6 +599,9 @@ if [[ "$NOTIFY_IDLE" == "true" ]]; then
 fi
 if [[ "$NOTIFY_PERMISSION" == "true" ]]; then
   EVENTS="$EVENTS, PermissionRequest"
+fi
+if [[ "$NOTIFY_REMIND" == "true" ]]; then
+  EVENTS="$EVENTS, UserPromptSubmit (reminder)"
 fi
 echo "  Events:    $EVENTS"
 

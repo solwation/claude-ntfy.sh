@@ -575,6 +575,7 @@ with unittest.mock.patch("urllib.request.Request", MockRequest), \
 
     tool_counts = {}
     ntfy_summary = None
+    last_assistant_text = ""
     for entry in entries[last_user_idx + 1:]:
         if entry.get("type") == "assistant":
             message = entry.get("message", {})
@@ -586,9 +587,13 @@ with unittest.mock.patch("urllib.request.Request", MockRequest), \
                             tool_name = block.get("name", "unknown")
                             tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
                         elif block.get("type") == "text":
-                            m = re.search(r'<!--\s*NTFY:\s*(.+?)\s*-->', block.get("text", ""))
+                            text = block.get("text", "").strip()
+                            m = re.search(r'<!--\s*NTFY:\s*(.+?)\s*-->', text)
                             if m:
                                 ntfy_summary = m.group(1)
+                            clean = re.sub(r'<!--\s*NTFY:.*?-->', '', text).strip()
+                            if clean and len(clean) > 20:
+                                last_assistant_text = clean
 
     mins = int(duration_secs) // 60
     secs = int(duration_secs) % 60
@@ -632,7 +637,21 @@ with unittest.mock.patch("urllib.request.Request", MockRequest), \
         if len(last_user_msg) > 200:
             task_text += "..."
         title = f"Claude done: {project_name} ({duration_str})"
-        body = f"📋 {task_text}\n🔧 {tool_summary} · 💻 {hostname}"
+
+        if last_assistant_text:
+            outcome = last_assistant_text[-300:].replace("\n", " ").strip()
+            for sep in ['. ', '! ', '— ', '; ']:
+                idx = outcome.rfind(sep)
+                if 0 < idx < len(outcome) - 20:
+                    outcome = outcome[idx + len(sep):]
+                    break
+            if len(outcome) > 200:
+                outcome = outcome[:200] + "..."
+            if outcome:
+                outcome = outcome[0].upper() + outcome[1:]
+            body = f"📋 {task_text}\n✅ {outcome}\n🔧 {tool_summary} · 💻 {hostname}"
+        else:
+            body = f"📋 {task_text}\n🔧 {tool_summary} · 💻 {hostname}"
 
     body = scrub_sensitive(body)
     title = scrub_sensitive(title)
@@ -1037,6 +1056,70 @@ transcript=$(make_transcript "cap_fallback.jsonl" \
 output=$(run_python_hook "$transcript" 5)
 assert_contains "fallback text capitalized" "$output" "Refactor the login flow"
 assert_not_contains "fallback text not lowercase" "$output" "📋 refactor the"
+
+# ════════════════════════════════════════════════════════════════════
+# PART 17: FALLBACK WITH ASSISTANT TEXT EXTRACTION
+# ════════════════════════════════════════════════════════════════════
+section "Fallback with assistant text as outcome"
+
+# 17a: No NTFY marker but substantial assistant text — should extract outcome
+ts_old=$(ts_ago 60)
+transcript=$(make_transcript "fallback_assist.jsonl" \
+  "{\"type\":\"user\",\"userType\":\"external\",\"timestamp\":\"$ts_old\",\"message\":{\"content\":\"add mTLS support\"}}" \
+  "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"I have implemented mutual TLS authentication. The server now validates client certificates and rejects unauthorized connections.\"}]}}")
+
+output=$(run_python_hook "$transcript" 5)
+assert_contains "fallback has outcome icon" "$output" "✅"
+assert_contains "fallback has assistant text" "$output" "client certificates"
+assert_contains "fallback has task from user msg" "$output" "Add mTLS support"
+
+# 17b: No NTFY marker and short assistant text (<=20 chars) — no outcome line
+transcript=$(make_transcript "fallback_short.jsonl" \
+  "{\"type\":\"user\",\"userType\":\"external\",\"timestamp\":\"$ts_old\",\"message\":{\"content\":\"check the status\"}}" \
+  "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"done\"}]}}")
+
+output=$(run_python_hook "$transcript" 5)
+assert_not_contains "short assistant text has no outcome" "$output" "✅"
+assert_contains "short fallback has task" "$output" "Check the status"
+
+# 17c: Long assistant text — truncated with sentence boundary
+transcript=$(make_transcript "fallback_long.jsonl" \
+  "{\"type\":\"user\",\"userType\":\"external\",\"timestamp\":\"$ts_old\",\"message\":{\"content\":\"refactor everything\"}}" \
+  "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"First I restructured the module layout to separate concerns properly. Then I updated all the imports across fifteen files. Finally I ran the full test suite and all 47 tests pass with no regressions.\"}]}}")
+
+output=$(run_python_hook "$transcript" 5)
+assert_contains "long fallback has outcome" "$output" "✅"
+assert_contains "long fallback has sentence extract" "$output" "test"
+
+# 17d: Assistant text with NTFY marker stripped from fallback consideration
+transcript=$(make_transcript "fallback_marker_strip.jsonl" \
+  "{\"type\":\"user\",\"userType\":\"external\",\"timestamp\":\"$ts_old\",\"message\":{\"content\":\"fix the bug\"}}" \
+  "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"I fixed the null pointer issue in the handler. The root cause was a missing nil check before dereferencing the config pointer.\"}]}}" \
+  "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"short\"}]}}")
+
+output=$(run_python_hook "$transcript" 5)
+assert_contains "uses substantial text not short one" "$output" "nil check"
+
+# ════════════════════════════════════════════════════════════════════
+# PART 18: UserPromptSubmit REMINDER HOOK
+# ════════════════════════════════════════════════════════════════════
+section "UserPromptSubmit reminder hook (default)"
+
+FAKE_HOME="$SANDBOX/home_remind_default"
+mkdir -p "$FAKE_HOME"
+run_setup --topic remind-test-9z1 --token tk_remind1 >/dev/null
+settings_content=$(cat "$FAKE_HOME/.claude/settings.json")
+assert_contains "UserPromptSubmit hook present by default" "$settings_content" '"UserPromptSubmit"'
+assert_contains "reminder has NTFY format" "$settings_content" "NTFY"
+
+section "UserPromptSubmit reminder disabled with --no-remind"
+
+FAKE_HOME="$SANDBOX/home_remind_off"
+mkdir -p "$FAKE_HOME"
+run_setup --topic remind-test-9z2 --token tk_remind2 --no-remind >/dev/null
+settings_content=$(cat "$FAKE_HOME/.claude/settings.json")
+assert_not_contains "no UserPromptSubmit with --no-remind" "$settings_content" '"UserPromptSubmit"'
+assert_contains "still has Stop hook" "$settings_content" '"Stop"'
 
 # ════════════════════════════════════════════════════════════════════
 # SUMMARY
